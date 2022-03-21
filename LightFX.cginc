@@ -37,6 +37,8 @@ sampler2D _DarkTex;
 sampler2D _DarkGloss;
 sampler2D _DarkEmissions;
 
+texture _LightMap;
+
 Interpolators vert (MeshData v) {
     Interpolators o;
 	o.uv = TRANSFORM_TEX(v.uv, _MainTex);
