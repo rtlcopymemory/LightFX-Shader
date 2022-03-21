@@ -1,4 +1,10 @@
-﻿#include "UnityCG.cginc"
+﻿// Upgrade NOTE: replaced '_Object2World' with 'unity_ObjectToWorld'
+// Upgrade NOTE: excluded shader from DX11, OpenGL ES 2.0 because it uses unsized arrays
+#pragma exclude_renderers d3d11 gles
+// Upgrade NOTE: excluded shader from DX11 because it uses wrong array syntax (type[size] name)
+#pragma exclude_renderers d3d11
+
+#include "UnityCG.cginc"
 #include "Lighting.cginc"
 #include "AutoLight.cginc"
 
@@ -19,6 +25,7 @@ struct Interpolators {
     float3 bitangent : TEXCOORD3;
     float3 wPos : TEXCOORD4;
     LIGHTING_COORDS(5,6)
+    float4 grabPos : TEXCOORD7;
 };
 
 sampler2D _MainTex;
@@ -37,7 +44,7 @@ sampler2D _DarkTex;
 sampler2D _DarkGloss;
 sampler2D _DarkEmissions;
 
-texture _LightMap;
+sampler2D _PrevBuffer; // binding the buffers to (global) GPU registers
 
 Interpolators vert (MeshData v) {
     Interpolators o;
@@ -52,6 +59,10 @@ Interpolators vert (MeshData v) {
     
     o.wPos = mul( unity_ObjectToWorld, v.vertex );
     TRANSFER_VERTEX_TO_FRAGMENT(o); // lighting, actually
+    
+    // use ComputeGrabScreenPos function from UnityCG.cginc
+    // to get the correct texture coordinate
+    o.grabPos = ComputeGrabScreenPos(o.vertex);
     return o;
 }
 
@@ -72,6 +83,10 @@ float4 SampleEmission(float2 uv, float t) {
 }
 
 float4 frag(Interpolators i) : SV_Target {
+    #ifndef IS_IN_BASE_PASS
+    float4 oldDiff = float4(tex2Dproj(_PrevBuffer, i.grabPos).aaa, 1);
+    #endif
+    
 	float3 V = normalize(_WorldSpaceCameraPos - i.wPos);
     
 	float3 tangentSpaceNormal = UnpackNormal(tex2D(_Normals, i.uv));
@@ -89,10 +104,17 @@ float4 frag(Interpolators i) : SV_Target {
 	float3 L = normalize(UnityWorldSpaceLightDir(i.wPos));
 	float attenuation = LIGHT_ATTENUATION(i);
     float3 lambert = saturate(dot(N, L) * 0.5 + 0.5);
-	float3 diffuseLight = max(_MinLight, lambert * attenuation) * _LightColor0.xyz;
+
+    float3 diffuseUncapped = lambert * attenuation * _LightColor0.xyz;
+    float3 diffuseLight = max(_MinLight, diffuseUncapped);
+    
+    #ifndef IS_IN_BASE_PASS
+    diffuseLight = saturate(diffuseLight + oldDiff.rgb);
+    diffuseUncapped = saturate(diffuseUncapped + oldDiff.xyz);
+    #endif
     
     // Diffuse Wrap
-    float NightT = saturate( InverseLerp(_DarknessStart, _DarknessEnd, (dot(N, L) * 0.5 + 0.5) * _LightColor0.w) );
+    float NightT = saturate(InverseLerp(_DarknessStart, _DarknessEnd, diffuseUncapped / _LightColor0.xyz * _LightColor0.w));
     
     // specular lighting
 	float3 H = normalize(L + V);
@@ -109,6 +131,12 @@ float4 frag(Interpolators i) : SV_Target {
     // Color
 	float3 color = SampleColor(i.uv, NightT).rgb;
 	float3 surfaceColor = color * _Color.rgb;
-        
-	return float4(max(diffuseLight * surfaceColor + specularLight, emissions * _EmissionIntensity), 1);
+    
+    // https://docs.unity3d.com/2022.2/Documentation/Manual/SL-BuiltinMacros.html
+    // If not on Base pass compute the differences to remove the previous colors
+    #ifndef IS_IN_BASE_PASS
+        return float4(max(diffuseLight * surfaceColor + specularLight, emissions * _EmissionIntensity), diffuseLight.x);
+    #endif
+    
+    return float4(max(diffuseLight * surfaceColor + specularLight, emissions * _EmissionIntensity), diffuseLight.x);
 }

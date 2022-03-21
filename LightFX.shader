@@ -17,8 +17,6 @@
         [NoScaleOffset] _DarkTex("Dark Texture", 2D) = "white" {}
         [NoScaleOffset] _DarkGloss("Dark Metallic-Smoothness", 2D) = "black" {}
         [NoScaleOffset] _DarkEmissions("Dark Emission Map", 2D) = "white" {}
-
-        [HideInInspector] _LightMap("INTERNAL ONLY", 2D) = "black" {}
     }
     SubShader
     {
@@ -36,9 +34,10 @@
         }
 
         // Add pass
+        GrabPass { "_PrevBuffer" }
         Pass {
             Tags { "LightMode" = "ForwardAdd" }
-            Blend One One // src*1 + dst*1
+            Blend One Zero // src*1 + dst*0
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
